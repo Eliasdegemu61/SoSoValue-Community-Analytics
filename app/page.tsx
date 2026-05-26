@@ -766,21 +766,31 @@ export default function Dashboard() {
                               
                               if (isObj) {
                                 url = postObj.url || postObj.post_link || "";
-                                description = postObj.content || "";
+                                description = postObj.content || postObj.post_content || "";
                                 username = postObj.username || username;
                                 
-                                const engagementStr = postObj.engagement || "";
-                                const lMatch = engagementStr.match(/(\d+)\s+likes?/i) || engagementStr.match(/Likes=(\d+)/i);
-                                const rpMatch = engagementStr.match(/(\d+)\s+reposts?/i) || engagementStr.match(/Reposts=(\d+)/i);
-                                const rMatch = engagementStr.match(/(\d+)\s+repl/i) || engagementStr.match(/Replies=(\d+)/i);
-                                const qMatch = engagementStr.match(/(\d+)\s+quotes?/i) || engagementStr.match(/Quotes=(\d+)/i);
-                                const vMatch = engagementStr.match(/(\d+)\s+views?/i) || engagementStr.match(/Views=(\d+)/i);
+                                const engagementObj = typeof postObj.engagement === 'object' && postObj.engagement !== null ? postObj.engagement : null;
+                                const engagementStr = typeof postObj.engagement === 'string' ? postObj.engagement : "";
                                 
-                                if (lMatch) likes = lMatch[1];
-                                if (rpMatch) reposts = rpMatch[1];
-                                if (rMatch) replies = rMatch[1];
-                                if (qMatch) quotes = qMatch[1];
-                                if (vMatch) views = vMatch[1];
+                                if (engagementObj) {
+                                  likes = String(engagementObj.likes || "0");
+                                  reposts = String(engagementObj.reposts || "0");
+                                  replies = String(engagementObj.replies || "0");
+                                  quotes = String(engagementObj.quotes || "0");
+                                  views = String(engagementObj.views || "0");
+                                } else if (engagementStr) {
+                                  const lMatch = engagementStr.match(/(\d+)\s+likes?/i) || engagementStr.match(/Likes=(\d+)/i);
+                                  const rpMatch = engagementStr.match(/(\d+)\s+reposts?/i) || engagementStr.match(/Reposts=(\d+)/i);
+                                  const rMatch = engagementStr.match(/(\d+)\s+repl/i) || engagementStr.match(/Replies=(\d+)/i);
+                                  const qMatch = engagementStr.match(/(\d+)\s+quotes?/i) || engagementStr.match(/Quotes=(\d+)/i);
+                                  const vMatch = engagementStr.match(/(\d+)\s+views?/i) || engagementStr.match(/Views=(\d+)/i);
+                                  
+                                  if (lMatch) likes = lMatch[1];
+                                  if (rpMatch) reposts = rpMatch[1];
+                                  if (rMatch) replies = rMatch[1];
+                                  if (qMatch) quotes = qMatch[1];
+                                  if (vMatch) views = vMatch[1];
+                                }
                               } else {
                                 const postStr = postObj as string;
                                 const urlMatch = postStr.match(/https?:\/\/\S+/);

@@ -67,45 +67,25 @@ export default function Dashboard() {
   const isDarkMode = resolvedTheme === "dark"
 
   const fetchWithCache = async (url: string, usePersistence = true) => {
-    const CACHE_DURATION = 2 * 60 * 1000
-    const sessionHit = sessionCache.current[url]
-    if (sessionHit && sessionHit.timestamp && (Date.now() - sessionHit.timestamp < CACHE_DURATION)) {
-      return sessionHit.data
-    }
-    if (usePersistence) {
-      try {
-        const cached = localStorage.getItem(`soso_cache_${url}`)
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          if (parsed.timestamp && (Date.now() - parsed.timestamp < CACHE_DURATION)) {
-            sessionCache.current[url] = parsed
-            return parsed.data
-          }
-        }
-      } catch (e) { }
-    }
     const response = await fetch(url)
     if (!response.ok) throw new Error(`HTTP ${response.status}`)
     const json = await response.json()
-    const cacheEntry = { data: json, timestamp: Date.now() }
-    sessionCache.current[url] = cacheEntry
-    if (usePersistence) {
-      try {
-        localStorage.setItem(`soso_cache_${url}`, JSON.stringify(cacheEntry))
-      } catch (e) { }
-    }
     return json
+  }
+
+  const toIsoDate = (value: Date) => {
+    const year = value.getFullYear()
+    const month = String(value.getMonth() + 1).padStart(2, "0")
+    const day = String(value.getDate()).padStart(2, "0")
+    return `${year}-${month}-${day}`
   }
 
   const fetchData = async () => {
     setLoading(true)
     setError(null)
     try {
-      const monthShort = date.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const day = String(date.getDate())
-      const fileName = `${monthShort}${day}_processed.json`
       const isToday = date.toDateString() === new Date().toDateString()
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/Json-data/main/${community}/${fileName}${isToday ? `?t=${Date.now()}` : ""}`
+      const url = `/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(date)}${isToday ? `&t=${Date.now()}` : ""}`
       try {
         const json = await fetchWithCache(url, !isToday)
         setData(json)
@@ -116,9 +96,7 @@ export default function Dashboard() {
         for (let i = 1; i <= 5; i++) {
           const prev = new Date(date);
           prev.setDate(prev.getDate() - i);
-          const pm = prev.toLocaleString("en-US", { month: "short" }).toLowerCase();
-          const pd = String(prev.getDate());
-          const purl = `https://raw.githubusercontent.com/Eliasdegemu61/Json-data/main/${community}/${pm}${pd}_processed.json`;
+          const purl = `/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(prev)}`;
           try {
             const json = await fetchWithCache(purl, true);
             setData(json);
@@ -147,9 +125,7 @@ export default function Dashboard() {
     try {
       const yesterday = new Date()
       yesterday.setDate(yesterday.getDate() - 1)
-      const m = yesterday.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const d = String(yesterday.getDate())
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/Json-data/main/${comm}/${m}${d}_processed.json?t=${Date.now()}`
+      const url = `/api/dashboard?platform=telegram&community=${comm}&date=${toIsoDate(yesterday)}&t=${Date.now()}`
       const response = await fetch(url)
       if (response.ok) {
         if (pollingIntervalsRef.current[comm]) clearInterval(pollingIntervalsRef.current[comm]!)
@@ -164,9 +140,7 @@ export default function Dashboard() {
     try {
       const prev = new Date(sel)
       prev.setDate(prev.getDate() - 1)
-      const m = prev.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const d = String(prev.getDate())
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/Json-data/main/${comm}/${m}${d}_processed.json`
+      const url = `/api/dashboard?platform=telegram&community=${comm}&date=${toIsoDate(prev)}`
       const json = await fetchWithCache(url, true)
       setPreviousDayData(json)
     } catch (e) { setPreviousDayData(null) }
@@ -176,10 +150,8 @@ export default function Dashboard() {
     setLoading(true)
     setError(null)
     try {
-      const m = date.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const d = String(date.getDate())
       const isToday = date.toDateString() === new Date().toDateString()
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/main/${m}${d}data.json${isToday ? `?t=${Date.now()}` : ""}`
+      const url = `/api/dashboard?platform=discord&date=${toIsoDate(date)}${isToday ? `&t=${Date.now()}` : ""}`
       try {
         const json = await fetchWithCache(url, !isToday)
         setDiscordData(json)
@@ -190,9 +162,7 @@ export default function Dashboard() {
         for (let i = 1; i <= 5; i++) {
           const prev = new Date(date);
           prev.setDate(prev.getDate() - i);
-          const pm = prev.toLocaleString("en-US", { month: "short" }).toLowerCase();
-          const pd = String(prev.getDate());
-          const purl = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/main/${pm}${pd}data.json`;
+          const purl = `/api/dashboard?platform=discord&date=${toIsoDate(prev)}`;
           try {
             const json = await fetchWithCache(purl, true);
             setDiscordData(json);
@@ -221,9 +191,7 @@ export default function Dashboard() {
     try {
       const prev = new Date(sel)
       prev.setDate(prev.getDate() - 1)
-      const m = prev.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const d = String(prev.getDate())
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/main/${m}${d}data.json`
+      const url = `/api/dashboard?platform=discord&date=${toIsoDate(prev)}`
       const json = await fetchWithCache(url, true)
       setPreviousDayDiscordData(json)
     } catch (e) { setPreviousDayDiscordData(null) }
@@ -233,9 +201,7 @@ export default function Dashboard() {
     try {
       const results = await Promise.all(Array.from({ length: 7 }, (_, i) => {
         const d = new Date(date); d.setDate(d.getDate() - i)
-        const ms = d.toLocaleString("en-US", { month: "short" }).toLowerCase()
-        const dd = String(d.getDate())
-        return fetchWithCache(`https://raw.githubusercontent.com/Eliasdegemu61/Json-data/main/${community}/${ms}${dd}_processed.json`, true).catch(() => null)
+        return fetchWithCache(`/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(d)}`, true).catch(() => null)
       }))
       const valid = results.filter(r => r !== null)
       const hours: Record<string, number> = {}
@@ -254,9 +220,7 @@ export default function Dashboard() {
     try {
       const results = await Promise.all(Array.from({ length: 7 }, (_, i) => {
         const d = new Date(date); d.setDate(d.getDate() - i)
-        const ms = d.toLocaleString("en-US", { month: "short" }).toLowerCase()
-        const dd = String(d.getDate())
-        return fetchWithCache(`https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/main/${ms}${dd}data.json`, true).catch(() => null)
+        return fetchWithCache(`/api/dashboard?platform=discord&date=${toIsoDate(d)}`, true).catch(() => null)
       }))
       const valid = results.filter(r => r !== null)
       const hours: Record<string, number> = {}
@@ -275,9 +239,7 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const ms = date.toLocaleString("en-US", { month: "short" }).toLowerCase();
-      const dd = String(date.getDate()).padStart(2, '0');
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/soso-x-analysis/main/${ms}${dd}.json`;
+      const url = `/api/dashboard?platform=x&date=${toIsoDate(date)}`;
       try {
         const json = await fetchWithCache(url, true);
         setXData(json);
@@ -287,9 +249,7 @@ export default function Dashboard() {
         for (let i = 1; i <= 5; i++) {
           const prev = new Date(date);
           prev.setDate(prev.getDate() - i);
-          const pms = prev.toLocaleString("en-US", { month: "short" }).toLowerCase();
-          const pdd = String(prev.getDate()).padStart(2, '0');
-          const purl = `https://raw.githubusercontent.com/Eliasdegemu61/soso-x-analysis/main/${pms}${pdd}.json`;
+          const purl = `/api/dashboard?platform=x&date=${toIsoDate(prev)}`;
           try {
             const json = await fetchWithCache(purl, true);
             setXData(json);
@@ -316,9 +276,7 @@ export default function Dashboard() {
   const fetchWeeklyReport = async () => {
     setLoading(true); setError(null)
     try {
-      const ms = date.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const dd = String(date.getDate())
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/refs/heads/main/weekly${ms}${dd}.json`
+      const url = `/api/dashboard?platform=weekly_report&date=${toIsoDate(date)}`
       const json = await fetchWithCache(url, true)
       setWeeklyReportData(json); setLastUpdated(new Date())
     } catch (e) {
@@ -326,9 +284,7 @@ export default function Dashboard() {
       for (let i = 1; i <= 5; i++) {
         const p = new Date(date);
         p.setDate(p.getDate() - i);
-        const pm = p.toLocaleString("en-US", { month: "short" }).toLowerCase();
-        const pd = String(p.getDate());
-        const purl = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/refs/heads/main/weekly${pm}${pd}.json`;
+        const purl = `/api/dashboard?platform=weekly_report&date=${toIsoDate(p)}`;
         try {
           const json = await fetchWithCache(purl, true);
           setWeeklyReportData(json);
@@ -349,9 +305,7 @@ export default function Dashboard() {
 
   const fetchWeeklySuggestions = async () => {
     try {
-      const ms = date.toLocaleString("en-US", { month: "short" }).toLowerCase()
-      const dd = String(date.getDate())
-      const url = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/refs/heads/main/weekly_suggestions/segg${ms}${dd}.json`
+      const url = `/api/dashboard?platform=weekly_suggestions&date=${toIsoDate(date)}`
       const json = await fetchWithCache(url, true)
       setWeeklySuggestions(json)
     } catch (e) {
@@ -359,9 +313,7 @@ export default function Dashboard() {
       for (let i = 1; i <= 5; i++) {
         const p = new Date(date);
         p.setDate(p.getDate() - i);
-        const pm = p.toLocaleString("en-US", { month: "short" }).toLowerCase();
-        const pd = String(p.getDate());
-        const purl = `https://raw.githubusercontent.com/Eliasdegemu61/discord-bot-data/refs/heads/main/weekly_suggestions/segg${pm}${pd}.json`;
+        const purl = `/api/dashboard?platform=weekly_suggestions&date=${toIsoDate(p)}`;
         try {
           const json = await fetchWithCache(purl, true);
           setWeeklySuggestions(json);

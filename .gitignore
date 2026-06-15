@@ -21,7 +21,6 @@ yarn-error.log*
 # local env files
 .env
 .env.*
-!.env.example
 .env*.local
 
 # vercel
@@ -38,3 +37,9 @@ next-live.out
 dev-live.log
 *.session
 *.session-journal
+SUPABASE_MIGRATION_PLAN.md
+build_output.txt
+dev_output.txt
+tsc_errors.txt
+tsc_output.txt
+history_archive/

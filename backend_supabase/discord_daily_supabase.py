@@ -28,6 +28,9 @@ CHANNELS = {
     "feedback": 1435653916174979233,
 }
 
+MAX_MESSAGES_PER_CHANNEL = 5000
+GEMINI_TIMEOUT_SECONDS = 90
+
 
 async def build_report() -> dict:
     target = singapore_yesterday()
@@ -41,6 +44,7 @@ async def build_report() -> dict:
 
     @bot.event
     async def on_ready() -> None:
+        print(f"Connected as {bot.user}. Starting Discord extraction...")
         stats = {
             "metadata": {
                 "target_date": target.label_short,
@@ -66,13 +70,17 @@ async def build_report() -> dict:
         chat_corpus = []
 
         for name, channel_id in CHANNELS.items():
+            print(f"Fetching channel: {name} ({channel_id})")
             channel = bot.get_channel(channel_id)
             if not channel:
+                print(f"Channel not found: {name}")
                 continue
-            async for msg in channel.history(limit=None, after=start_utc, before=end_utc):
+            channel_count = 0
+            async for msg in channel.history(limit=MAX_MESSAGES_PER_CHANNEL, after=start_utc, before=end_utc):
                 if msg.author.bot:
                     continue
                 stats["vitals"]["total_messages"] += 1
+                channel_count += 1
                 active_user_ids.add(msg.author.id)
                 msg_sg = msg.created_at.astimezone(start_utc.tzinfo or tz_target)
                 hour_label = msg_sg.strftime("%I %p")
@@ -84,6 +92,10 @@ async def build_report() -> dict:
                     mod_counts[msg.author.name] += 1
                 if name in {"general", "help-general", "feedback"}:
                     chat_corpus.append(f"{msg.author.name}: {msg.content}")
+                if channel_count % 500 == 0:
+                    print(f"  {name}: processed {channel_count} messages")
+
+            print(f"Finished channel {name}: {channel_count} messages")
 
         stats["vitals"]["active_users"] = len(active_user_ids)
         stats["top_moderators"] = [
@@ -96,21 +108,31 @@ async def build_report() -> dict:
         ]
 
         if chat_corpus:
+            print(f"Sending {len(chat_corpus[-1500:])} Discord messages to Gemini...")
             prompt = (
                 "Analyze these Discord logs and return JSON with a 'reports' object. "
                 "The object must contain retail, trading, tickets, and dev. "
                 "Each section must have 'summary' and 'questions'."
             )
-            response = gemini_client.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_corpus[-1500:]),
-                config={"response_mime_type": "application/json"},
-            )
-            ai_data = json.loads(response.text)
-            if "reports" in ai_data:
-                stats["reports"] = ai_data["reports"]
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        gemini_client.models.generate_content,
+                        model="gemini-3-flash-preview",
+                        contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_corpus[-1500:]),
+                        config={"response_mime_type": "application/json"},
+                    ),
+                    timeout=GEMINI_TIMEOUT_SECONDS,
+                )
+                ai_data = json.loads(response.text)
+                if "reports" in ai_data:
+                    stats["reports"] = ai_data["reports"]
+                print("Gemini analysis completed.")
+            except Exception as exc:
+                print(f"Gemini analysis failed or timed out: {exc}")
 
         result_holder["stats"] = stats
+        print(f"Discord extraction complete for {target.iso_date}.")
         done_event.set()
         await bot.close()
 

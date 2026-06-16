@@ -31,6 +31,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r backend_supabase/requirements.txt
 
+      - name: Wait to avoid Gemini overlap
+        run: sleep 420
+
       - name: Run Telegram daily pipeline
         run: python -m backend_supabase.telegram_daily_supabase
 
@@ -88,6 +91,9 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r backend_supabase/requirements.txt
 
+      - name: Wait after Discord before weekly Gemini analysis
+        run: sleep 300
+
       - name: Run weekly report pipeline
         run: python -m backend_supabase.weekly_report_supabase
 
@@ -116,6 +122,9 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r backend_supabase/requirements.txt
+
+      - name: Wait before suggestions Gemini analysis
+        run: sleep 120
 
       - name: Run weekly suggestions pipeline
         run: python -m backend_supabase.weekly_suggestions_supabase

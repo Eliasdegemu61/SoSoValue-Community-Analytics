@@ -25,6 +25,7 @@ CHAT_ID = "sosovaluecommunity"
 DEFAULT_COMMUNITY = "SOSOVALUE"
 MAX_TELEGRAM_MESSAGES = 10000
 GEMINI_TIMEOUT_SECONDS = 90
+GEMINI_RETRIES = 3
 
 SECTION_NAMES = {
     "1": "General",
@@ -55,6 +56,33 @@ MOD_MAPPING = {
 
 def parse_analysis(raw: dict) -> tuple[str, list[str]]:
     return raw.get("summary", ""), raw.get("questions", [])
+
+
+async def generate_analysis(gemini_client: genai.Client, prompt: str, contents: str) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(1, GEMINI_RETRIES + 1):
+        try:
+            print(f"Gemini Telegram analysis attempt {attempt}/{GEMINI_RETRIES}...")
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    gemini_client.models.generate_content,
+                    model="gemini-3-flash-preview",
+                    contents=f"{prompt}\n\nDATA:\n{contents}",
+                    config={"response_mime_type": "application/json"},
+                ),
+                timeout=GEMINI_TIMEOUT_SECONDS,
+            )
+            payload = json.loads(response.text)
+            summary, questions = parse_analysis(payload)
+            if not summary.strip() and not questions:
+                raise ValueError("Gemini returned empty Telegram summary and questions.")
+            return payload
+        except Exception as exc:
+            last_error = exc
+            print(f"Gemini Telegram analysis attempt {attempt} failed: {exc}")
+            if attempt < GEMINI_RETRIES:
+                await asyncio.sleep(20 * attempt)
+    raise RuntimeError(f"Gemini Telegram analysis failed after {GEMINI_RETRIES} attempts: {last_error}")
 
 
 async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
@@ -113,25 +141,13 @@ async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
         ai_raw = {}
         summary = ""
         questions: list[str] = []
-        if chat_logs_for_ai:
-            prompt = "Analyze these Telegram messages. Return JSON with 'summary' and 'questions'."
-            try:
-                print(f"Sending {len(chat_logs_for_ai[-1000:])} Telegram messages to Gemini...")
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        gemini_client.models.generate_content,
-                        model="gemini-3-flash-preview",
-                        contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_logs_for_ai[-1000:]),
-                        config={"response_mime_type": "application/json"},
-                    ),
-                    timeout=GEMINI_TIMEOUT_SECONDS,
-                )
-                ai_raw = json.loads(response.text)
-                summary, questions = parse_analysis(ai_raw)
-            except Exception as exc:
-                summary = f"AI analysis unavailable for this run: {exc}"
-                questions = []
-                ai_raw = {"error": str(exc)}
+        if not chat_logs_for_ai:
+            raise RuntimeError("No Telegram messages found for the target date; refusing to save an empty report.")
+
+        prompt = "Analyze these Telegram messages. Return JSON with 'summary' and 'questions'."
+        print(f"Sending {len(chat_logs_for_ai[-1000:])} Telegram messages to Gemini...")
+        ai_raw = await generate_analysis(gemini_client, prompt, "\n".join(chat_logs_for_ai[-1000:]))
+        summary, questions = parse_analysis(ai_raw)
 
         return {
             "date": target.iso_date,

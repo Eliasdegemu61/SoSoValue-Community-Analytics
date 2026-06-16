@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 
 from google import genai
 
@@ -12,6 +13,7 @@ from .supabase_store import fetch_discord_reports_window, get_supabase, upsert_s
 load_env()
 
 GEMINI_API_KEY = require_env("GEMINI_API_KEY")
+GEMINI_RETRIES = 3
 
 
 def normalize_category(value: str) -> str:
@@ -32,6 +34,28 @@ def normalize_action_type(value: str) -> str:
     if raw == "communicate":
         return "communicate"
     return "resolve"
+
+
+def generate_suggestions(gemini_client: genai.Client, prompt: str, weekly_reports: list[dict]) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(1, GEMINI_RETRIES + 1):
+        try:
+            print(f"Gemini weekly suggestions attempt {attempt}/{GEMINI_RETRIES}...")
+            response = gemini_client.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=f"{prompt}\n\nDATA:\n{json.dumps(weekly_reports, indent=2)}",
+                config={"response_mime_type": "application/json"},
+            )
+            payload = json.loads(response.text)
+            if not isinstance(payload.get("team_suggestions"), list) or not payload["team_suggestions"]:
+                raise ValueError("Gemini returned empty weekly suggestions.")
+            return payload
+        except Exception as exc:
+            last_error = exc
+            print(f"Gemini weekly suggestions attempt {attempt} failed: {exc}")
+            if attempt < GEMINI_RETRIES:
+                time.sleep(20 * attempt)
+    raise RuntimeError(f"Gemini weekly suggestions failed after {GEMINI_RETRIES} attempts: {last_error}")
 
 
 def build_weekly_suggestions() -> dict:
@@ -69,18 +93,7 @@ def build_weekly_suggestions() -> dict:
     }
     """
 
-    try:
-        response = gemini_client.models.generate_content(
-            model="gemini-3-flash-preview",
-            contents=f"{prompt}\n\nDATA:\n{json.dumps(weekly_reports, indent=2)}",
-            config={"response_mime_type": "application/json"},
-        )
-        payload = json.loads(response.text)
-    except Exception as exc:
-        payload = {
-            "team_suggestions": [],
-            "ai_error": str(exc),
-        }
+    payload = generate_suggestions(gemini_client, prompt, weekly_reports)
 
     normalized_items = []
     for item in payload.get("team_suggestions", []):

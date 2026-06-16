@@ -30,6 +30,73 @@ CHANNELS = {
 
 MAX_MESSAGES_PER_CHANNEL = 5000
 GEMINI_TIMEOUT_SECONDS = 90
+GEMINI_RETRIES = 3
+
+
+def normalize_reports(value: dict) -> dict:
+    reports = {
+        "retail": {"summary": "", "questions": []},
+        "trading": {"summary": "", "questions": []},
+        "tickets": {"summary": "", "questions": []},
+        "dev": {"summary": "", "questions": []},
+    }
+    if not isinstance(value, dict):
+        return reports
+    for key, section in value.items():
+        raw_key = str(key).lower()
+        if "retail" in raw_key:
+            normalized_key = "retail"
+        elif "trading" in raw_key:
+            normalized_key = "trading"
+        elif "ticket" in raw_key or "support" in raw_key:
+            normalized_key = "tickets"
+        elif "dev" in raw_key:
+            normalized_key = "dev"
+        else:
+            continue
+        if not isinstance(section, dict):
+            continue
+        questions = section.get("questions", [])
+        reports[normalized_key] = {
+            "summary": str(section.get("summary", "")).strip(),
+            "questions": questions if isinstance(questions, list) else [],
+        }
+    return reports
+
+
+def has_useful_reports(reports: dict) -> bool:
+    return any(
+        bool(section.get("summary", "").strip()) or bool(section.get("questions"))
+        for section in reports.values()
+        if isinstance(section, dict)
+    )
+
+
+async def generate_reports(gemini_client: genai.Client, prompt: str, contents: str) -> dict:
+    last_error: Exception | None = None
+    for attempt in range(1, GEMINI_RETRIES + 1):
+        try:
+            print(f"Gemini Discord analysis attempt {attempt}/{GEMINI_RETRIES}...")
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    gemini_client.models.generate_content,
+                    model="gemini-3-flash-preview",
+                    contents=f"{prompt}\n\nDATA:\n{contents}",
+                    config={"response_mime_type": "application/json"},
+                ),
+                timeout=GEMINI_TIMEOUT_SECONDS,
+            )
+            payload = json.loads(response.text)
+            reports = normalize_reports(payload.get("reports", {}))
+            if not has_useful_reports(reports):
+                raise ValueError("Gemini returned empty Discord reports.")
+            return reports
+        except Exception as exc:
+            last_error = exc
+            print(f"Gemini Discord analysis attempt {attempt} failed: {exc}")
+            if attempt < GEMINI_RETRIES:
+                await asyncio.sleep(20 * attempt)
+    raise RuntimeError(f"Gemini Discord analysis failed after {GEMINI_RETRIES} attempts: {last_error}")
 
 
 async def build_report() -> dict:
@@ -105,29 +172,28 @@ async def build_report() -> dict:
             for name, count in sorted(user_counts.items(), key=lambda item: item[1], reverse=True)[:10]
         ]
 
-        if chat_corpus:
-            print(f"Sending {len(chat_corpus[-1500:])} Discord messages to Gemini...")
-            prompt = (
-                "Analyze these Discord logs and return JSON with a 'reports' object. "
-                "The object must contain retail, trading, tickets, and dev. "
-                "Each section must have 'summary' and 'questions'."
+        if not chat_corpus:
+            result_holder["error"] = RuntimeError(
+                "No Discord messages found for Gemini analysis; refusing to save an empty report."
             )
-            try:
-                response = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        gemini_client.models.generate_content,
-                        model="gemini-3-flash-preview",
-                        contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_corpus[-1500:]),
-                        config={"response_mime_type": "application/json"},
-                    ),
-                    timeout=GEMINI_TIMEOUT_SECONDS,
-                )
-                ai_data = json.loads(response.text)
-                if "reports" in ai_data:
-                    stats["reports"] = ai_data["reports"]
-                print("Gemini analysis completed.")
-            except Exception as exc:
-                print(f"Gemini analysis failed or timed out: {exc}")
+            done_event.set()
+            await bot.close()
+            return
+
+        print(f"Sending {len(chat_corpus[-1500:])} Discord messages to Gemini...")
+        prompt = (
+            "Analyze these Discord logs and return JSON with a 'reports' object. "
+            "The object must contain retail, trading, tickets, and dev. "
+            "Each section must have 'summary' and 'questions'."
+        )
+        try:
+            stats["reports"] = await generate_reports(gemini_client, prompt, "\n".join(chat_corpus[-1500:]))
+            print("Gemini analysis completed.")
+        except Exception as exc:
+            result_holder["error"] = exc
+            done_event.set()
+            await bot.close()
+            return
 
         result_holder["stats"] = stats
         print(f"Discord extraction complete for {target.iso_date}.")
@@ -137,6 +203,8 @@ async def build_report() -> dict:
     async with bot:
         await bot.start(DISCORD_TOKEN)
     await done_event.wait()
+    if "error" in result_holder:
+        raise result_holder["error"]
     return result_holder["stats"]
 
 

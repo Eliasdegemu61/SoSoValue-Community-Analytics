@@ -95,6 +95,7 @@ function toDiscordPayload(row: any) {
   const rawPayload = row.raw_payload || {}
   const vitals = rawPayload.vitals || {}
   return {
+    date: row.report_date,
     vitals: {
       total_messages: row.total_messages ?? vitals.total_messages ?? 0,
       active_users: row.active_users ?? vitals.active_users ?? vitals.active_users_count ?? 0,
@@ -140,6 +141,7 @@ function toXPayload(row: any) {
     []
 
   return {
+    date: row.report_date,
     summary: {
       sosovalue: typeof summary.sosovalue === "string" ? summary.sosovalue : "",
       sodex: typeof summary.sodex === "string" ? summary.sodex : "",
@@ -158,14 +160,23 @@ function toXPayload(row: any) {
 function toWeeklyReportPayload(row: any) {
   const rawPayload = row.raw_payload || {}
   return {
+    date: row.report_date,
     reports: normalizeSectionReports(row.reports || rawPayload.reports || {}),
   }
 }
 
 function toWeeklySuggestionsPayload(row: any) {
   return {
+    date: row.report_date,
     team_suggestions: row.team_suggestions || [],
   }
+}
+
+function dateQuery(date: string, allowFallback: boolean) {
+  if (allowFallback) {
+    return `report_date=lte.${encodeURIComponent(date)}&order=report_date.desc&limit=1`
+  }
+  return `report_date=eq.${encodeURIComponent(date)}&limit=1`
 }
 
 export async function GET(request: NextRequest) {
@@ -174,6 +185,7 @@ export async function GET(request: NextRequest) {
     const platform = searchParams.get("platform") as Platform | null
     const date = searchParams.get("date")
     const community = searchParams.get("community") as Community | null
+    const allowFallback = searchParams.get("fallback") === "latest"
 
     if (!platform || !date) {
       return NextResponse.json({ error: "Missing platform or date" }, { status: 400 })
@@ -187,7 +199,7 @@ export async function GET(request: NextRequest) {
       }
       data = await supabaseQuery(
         "telegram_daily_reports",
-        `select=*&community=eq.${encodeURIComponent(community)}&report_date=eq.${encodeURIComponent(date)}&limit=1`
+        `select=*&community=eq.${encodeURIComponent(community)}&${dateQuery(date, allowFallback)}`
       )
       if (!data.length) return NextResponse.json({ error: "Not found" }, { status: 404 })
       return NextResponse.json(toTelegramPayload(data[0]))
@@ -196,7 +208,7 @@ export async function GET(request: NextRequest) {
     if (platform === "discord") {
       data = await supabaseQuery(
         "discord_daily_reports",
-        `select=*&report_date=eq.${encodeURIComponent(date)}&limit=1`
+        `select=*&${dateQuery(date, allowFallback)}`
       )
       if (!data.length) return NextResponse.json({ error: "Not found" }, { status: 404 })
       return NextResponse.json(toDiscordPayload(data[0]))
@@ -205,7 +217,7 @@ export async function GET(request: NextRequest) {
     if (platform === "x") {
       data = await supabaseQuery(
         "x_daily_reports",
-        `select=*&report_date=eq.${encodeURIComponent(date)}&limit=1`
+        `select=*&${dateQuery(date, allowFallback)}`
       )
       if (!data.length) return NextResponse.json({ error: "Not found" }, { status: 404 })
       return NextResponse.json(toXPayload(data[0]))
@@ -214,7 +226,7 @@ export async function GET(request: NextRequest) {
     if (platform === "weekly_report") {
       data = await supabaseQuery(
         "weekly_reports",
-        `select=*&report_date=eq.${encodeURIComponent(date)}&limit=1`
+        `select=*&${dateQuery(date, allowFallback)}`
       )
       if (!data.length) return NextResponse.json({ error: "Not found" }, { status: 404 })
       return NextResponse.json(toWeeklyReportPayload(data[0]))
@@ -223,7 +235,7 @@ export async function GET(request: NextRequest) {
     if (platform === "weekly_suggestions") {
       data = await supabaseQuery(
         "weekly_suggestions",
-        `select=*&report_date=eq.${encodeURIComponent(date)}&limit=1`
+        `select=*&${dateQuery(date, allowFallback)}`
       )
       if (!data.length) return NextResponse.json({ error: "Not found" }, { status: 404 })
       return NextResponse.json(toWeeklySuggestionsPayload(data[0]))

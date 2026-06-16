@@ -80,41 +80,34 @@ export default function Dashboard() {
     return `${year}-${month}-${day}`
   }
 
+  const dateFromApi = (value?: string) => {
+    if (!value) return null
+    const parsed = new Date(`${value}T00:00:00`)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+
+  const showFallbackNotice = (servedDate: string | undefined, requested: Date) => {
+    if (!servedDate || servedDate === toIsoDate(requested)) return
+    const served = dateFromApi(servedDate)
+    if (!served) return
+    const prevFormat = served.toLocaleDateString("en-US", { month: "long", day: "numeric" })
+    const currFormat = requested.toLocaleDateString("en-US", { month: "long", day: "numeric" })
+    setError(`Displaying ${prevFormat} data. ${currFormat} data is not available yet.`)
+  }
+
   const fetchData = async () => {
     setLoading(true)
     setError(null)
     try {
       const isToday = date.toDateString() === new Date().toDateString()
-      const url = `/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(date)}${isToday ? `&t=${Date.now()}` : ""}`
-      try {
-        const json = await fetchWithCache(url, !isToday)
-        setData(json)
-        setLastUpdated(new Date())
-        fetchPreviousDayData(community, date)
-      } catch (e) {
-        let found = false;
-        for (let i = 1; i <= 5; i++) {
-          const prev = new Date(date);
-          prev.setDate(prev.getDate() - i);
-          const purl = `/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(prev)}`;
-          try {
-            const json = await fetchWithCache(purl, true);
-            setData(json);
-            const prevFormat = prev.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            const currFormat = date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            setError(`Displaying ${prevFormat} data. ${currFormat} data is not available yet.`);
-            fetchPreviousDayData(community, prev);
-            found = true;
-            break;
-          } catch (err) { }
-        }
-        if (!found) {
-          setError(t("noDataForDate"));
-          setData(null);
-        }
-      }
+      const url = `/api/dashboard?platform=telegram&community=${community}&date=${toIsoDate(date)}&fallback=latest${isToday ? `&t=${Date.now()}` : ""}`
+      const json = await fetchWithCache(url, !isToday)
+      setData(json)
+      showFallbackNotice(json.date, date)
+      setLastUpdated(new Date())
+      fetchPreviousDayData(community, dateFromApi(json.date) || date)
     } catch (err) {
-      setError(t("failedToFetch"))
+      setError(t("noDataForDate"))
       setData(null)
     } finally {
       setLoading(false)
@@ -151,36 +144,14 @@ export default function Dashboard() {
     setError(null)
     try {
       const isToday = date.toDateString() === new Date().toDateString()
-      const url = `/api/dashboard?platform=discord&date=${toIsoDate(date)}${isToday ? `&t=${Date.now()}` : ""}`
-      try {
-        const json = await fetchWithCache(url, !isToday)
-        setDiscordData(json)
-        setLastUpdated(new Date())
-        fetchPreviousDayDiscordData(date)
-      } catch (e) {
-        let found = false;
-        for (let i = 1; i <= 5; i++) {
-          const prev = new Date(date);
-          prev.setDate(prev.getDate() - i);
-          const purl = `/api/dashboard?platform=discord&date=${toIsoDate(prev)}`;
-          try {
-            const json = await fetchWithCache(purl, true);
-            setDiscordData(json);
-            const prevFormat = prev.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            const currFormat = date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            setError(`Displaying ${prevFormat} data. ${currFormat} data is not available yet.`);
-            fetchPreviousDayDiscordData(prev);
-            found = true;
-            break;
-          } catch (err) { }
-        }
-        if (!found) {
-          setError(t("noDataForDate"));
-          setDiscordData(null);
-        }
-      }
+      const url = `/api/dashboard?platform=discord&date=${toIsoDate(date)}&fallback=latest${isToday ? `&t=${Date.now()}` : ""}`
+      const json = await fetchWithCache(url, !isToday)
+      setDiscordData(json)
+      showFallbackNotice(json.date, date)
+      setLastUpdated(new Date())
+      fetchPreviousDayDiscordData(dateFromApi(json.date) || date)
     } catch (err) {
-      setError(t("failedToFetchDiscord"))
+      setError(t("noDataForDate"))
       setDiscordData(null)
     } finally {
       setLoading(false)
@@ -239,32 +210,11 @@ export default function Dashboard() {
     setLoading(true);
     setError(null);
     try {
-      const url = `/api/dashboard?platform=x&date=${toIsoDate(date)}`;
-      try {
-        const json = await fetchWithCache(url, true);
-        setXData(json);
-        setLastUpdated(new Date());
-      } catch (e) {
-        let found = false;
-        for (let i = 1; i <= 5; i++) {
-          const prev = new Date(date);
-          prev.setDate(prev.getDate() - i);
-          const purl = `/api/dashboard?platform=x&date=${toIsoDate(prev)}`;
-          try {
-            const json = await fetchWithCache(purl, true);
-            setXData(json);
-            const prevFormat = prev.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            const currFormat = date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-            setError(`Displaying ${prevFormat} data. ${currFormat} data is not available yet.`);
-            found = true;
-            break;
-          } catch (err) { }
-        }
-        if (!found) {
-          setError("Failed to fetch X data");
-          setXData(null);
-        }
-      }
+      const url = `/api/dashboard?platform=x&date=${toIsoDate(date)}&fallback=latest`;
+      const json = await fetchWithCache(url, true);
+      setXData(json);
+      showFallbackNotice(json.date, date)
+      setLastUpdated(new Date());
     } catch (err) {
       setError("Failed to fetch X data");
       setXData(null);
@@ -276,54 +226,23 @@ export default function Dashboard() {
   const fetchWeeklyReport = async () => {
     setLoading(true); setError(null)
     try {
-      const url = `/api/dashboard?platform=weekly_report&date=${toIsoDate(date)}`
+      const url = `/api/dashboard?platform=weekly_report&date=${toIsoDate(date)}&fallback=latest`
       const json = await fetchWithCache(url, true)
+      showFallbackNotice(json.date, date)
       setWeeklyReportData(json); setLastUpdated(new Date())
     } catch (e) {
-      let found = false;
-      for (let i = 1; i <= 5; i++) {
-        const p = new Date(date);
-        p.setDate(p.getDate() - i);
-        const purl = `/api/dashboard?platform=weekly_report&date=${toIsoDate(p)}`;
-        try {
-          const json = await fetchWithCache(purl, true);
-          setWeeklyReportData(json);
-          setLastUpdated(new Date());
-          const prevFormat = p.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-          const currFormat = date.toLocaleDateString("en-US", { month: "long", day: "numeric" });
-          setError(`Displaying ${prevFormat} data. ${currFormat} data is not available yet.`);
-          found = true;
-          break;
-        } catch (err) { }
-      }
-      if (!found) {
-        setError(t("noDataForDate"));
-        setWeeklyReportData(null);
-      }
+      setError(t("noDataForDate"));
+      setWeeklyReportData(null);
     } finally { setLoading(false) }
   }
 
   const fetchWeeklySuggestions = async () => {
     try {
-      const url = `/api/dashboard?platform=weekly_suggestions&date=${toIsoDate(date)}`
+      const url = `/api/dashboard?platform=weekly_suggestions&date=${toIsoDate(date)}&fallback=latest`
       const json = await fetchWithCache(url, true)
       setWeeklySuggestions(json)
     } catch (e) {
-      let found = false;
-      for (let i = 1; i <= 5; i++) {
-        const p = new Date(date);
-        p.setDate(p.getDate() - i);
-        const purl = `/api/dashboard?platform=weekly_suggestions&date=${toIsoDate(p)}`;
-        try {
-          const json = await fetchWithCache(purl, true);
-          setWeeklySuggestions(json);
-          found = true;
-          break;
-        } catch (err) { }
-      }
-      if (!found) {
-        setWeeklySuggestions(null);
-      }
+      setWeeklySuggestions(null);
     }
   }
 

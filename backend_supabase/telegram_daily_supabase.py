@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections import Counter
 from datetime import datetime, timezone
 
@@ -20,10 +19,12 @@ load_env()
 API_ID = int(require_env("TELEGRAM_API_ID"))
 API_HASH = require_env("TELEGRAM_API_HASH")
 GEMINI_API_KEY = require_env("GEMINI_API_KEY")
-TELEGRAM_STRING_SESSION = os.getenv("TELEGRAM_STRING_SESSION", "").strip()
+TELEGRAM_STRING_SESSION = require_env("TELEGRAM_STRING_SESSION").strip()
 
 CHAT_ID = "sosovaluecommunity"
 DEFAULT_COMMUNITY = "SOSOVALUE"
+MAX_TELEGRAM_MESSAGES = 10000
+GEMINI_TIMEOUT_SECONDS = 90
 
 SECTION_NAMES = {
     "1": "General",
@@ -59,9 +60,16 @@ def parse_analysis(raw: dict) -> tuple[str, list[str]]:
 async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
     target = singapore_yesterday()
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
-    session = StringSession(TELEGRAM_STRING_SESSION) if TELEGRAM_STRING_SESSION else "mobile_session"
+    session = StringSession(TELEGRAM_STRING_SESSION)
 
     async with TelegramClient(session, API_ID, API_HASH) as client:
+        if not await client.is_user_authorized():
+            raise RuntimeError(
+                "Telegram string session is missing, expired, or invalid. "
+                "Regenerate TELEGRAM_STRING_SESSION locally and update the GitHub secret."
+            )
+
+        print(f"Connected to Telegram. Starting extraction for {target.iso_date}...")
         entity = await client.get_entity(CHAT_ID)
         start_win = datetime.combine(target.report_date, datetime.min.time(), tzinfo=SINGAPORE_TZ)
         end_win = datetime.combine(target.report_date, datetime.max.time().replace(microsecond=0), tzinfo=SINGAPORE_TZ)
@@ -78,6 +86,12 @@ async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
                 break
 
             total_msg_count += 1
+            if total_msg_count % 500 == 0:
+                print(f"Processed {total_msg_count} Telegram messages...")
+            if total_msg_count >= MAX_TELEGRAM_MESSAGES:
+                print(f"Reached Telegram message cap ({MAX_TELEGRAM_MESSAGES}); continuing with collected data.")
+                break
+
             sid = "1"
             if msg.reply_to:
                 raw_id = getattr(msg.reply_to, "reply_to_top_id", None)
@@ -102,10 +116,15 @@ async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
         if chat_logs_for_ai:
             prompt = "Analyze these Telegram messages. Return JSON with 'summary' and 'questions'."
             try:
-                response = gemini_client.models.generate_content(
-                    model="gemini-3-flash-preview",
-                    contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_logs_for_ai[-1000:]),
-                    config={"response_mime_type": "application/json"},
+                print(f"Sending {len(chat_logs_for_ai[-1000:])} Telegram messages to Gemini...")
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        gemini_client.models.generate_content,
+                        model="gemini-3-flash-preview",
+                        contents=f"{prompt}\n\nDATA:\n" + "\n".join(chat_logs_for_ai[-1000:]),
+                        config={"response_mime_type": "application/json"},
+                    ),
+                    timeout=GEMINI_TIMEOUT_SECONDS,
                 )
                 ai_raw = json.loads(response.text)
                 summary, questions = parse_analysis(ai_raw)

@@ -32,34 +32,75 @@ async function supabaseQuery(table: string, query: string) {
 }
 
 function toTelegramPayload(row: any) {
-  const summary = row.summary || ""
-  const questions = Array.isArray(row.questions) ? row.questions : []
+  const rawPayload = row.raw_payload || {}
+  const summary = row.summary || rawPayload.analysis?.summary || ""
+  const questionsSource = row.questions || rawPayload.analysis?.questions || []
+  const questions = Array.isArray(questionsSource)
+    ? questionsSource.map((q: any) => (typeof q === "string" ? q : q?.question || q?.text || "")).filter(Boolean)
+    : []
   const aiAnalysis = `Summary: ${summary}\n\nTop Community Questions:\n${questions.map((q: string, i: number) => `${i + 1}. ${q}`).join("\n")}`
 
   return {
     date: row.report_date,
     totals: {
-      messages: row.total_messages ?? 0,
-      users: row.active_users ?? 0,
+      messages: row.total_messages ?? rawPayload.totals?.messages ?? 0,
+      users: row.active_users ?? rawPayload.totals?.users ?? 0,
     },
-    active_hours_sgt: row.active_hours_sgt || {},
+    active_hours_sgt: row.active_hours_sgt || rawPayload.active_hours_sgt || {},
     ai_analysis: aiAnalysis,
-    sections: row.sections || [],
+    sections: row.sections || rawPayload.sections || [],
     leaderboards: {
-      community_users: row.community_users || [],
-      moderators: row.moderators || [],
+      community_users: row.community_users || rawPayload.leaderboards?.community_users || [],
+      moderators: row.moderators || rawPayload.leaderboards?.moderators || [],
     },
   }
 }
 
+function normalizeDiscordCategory(key: string) {
+  const raw = key.toLowerCase().trim()
+  if (raw.includes("retail")) return "retail"
+  if (raw.includes("trading")) return "trading"
+  if (raw.includes("ticket") || raw.includes("support")) return "tickets"
+  if (raw.includes("dev")) return "dev"
+  return raw
+}
+
+function normalizeSectionReports(value: any) {
+  const normalized: Record<string, { summary: string; questions: string[] }> = {
+    retail: { summary: "", questions: [] },
+    trading: { summary: "", questions: [] },
+    tickets: { summary: "", questions: [] },
+    dev: { summary: "", questions: [] },
+  }
+
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const [rawKey, rawSection] of Object.entries(value)) {
+      const key = normalizeDiscordCategory(rawKey)
+      if (!normalized[key]) continue
+      const section = rawSection as any
+      const questions = Array.isArray(section?.questions)
+        ? section.questions.map((q: any) => (typeof q === "string" ? q : q?.question || q?.text || "")).filter(Boolean)
+        : []
+      normalized[key] = {
+        summary: typeof section?.summary === "string" ? section.summary : "",
+        questions,
+      }
+    }
+  }
+
+  return normalized
+}
+
 function toDiscordPayload(row: any) {
+  const rawPayload = row.raw_payload || {}
+  const vitals = rawPayload.vitals || {}
   return {
     vitals: {
-      total_messages: row.total_messages ?? 0,
-      active_users: row.active_users ?? 0,
+      total_messages: row.total_messages ?? vitals.total_messages ?? 0,
+      active_users: row.active_users ?? vitals.active_users ?? vitals.active_users_count ?? 0,
     },
-    hourly_activity: row.hourly_activity || {},
-    reports: row.reports || {},
+    hourly_activity: row.hourly_activity || rawPayload.hourly_activity || {},
+    reports: normalizeSectionReports(row.reports || rawPayload.reports || {}),
   }
 }
 
@@ -115,8 +156,9 @@ function toXPayload(row: any) {
 }
 
 function toWeeklyReportPayload(row: any) {
+  const rawPayload = row.raw_payload || {}
   return {
-    reports: row.reports || {},
+    reports: normalizeSectionReports(row.reports || rawPayload.reports || {}),
   }
 }
 

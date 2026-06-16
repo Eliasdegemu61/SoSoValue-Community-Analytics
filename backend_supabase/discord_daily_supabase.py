@@ -9,7 +9,7 @@ import discord
 from google import genai
 
 from .config import load_env, require_env
-from .date_utils import singapore_day_bounds_utc, singapore_yesterday
+from .date_utils import SINGAPORE_TZ, singapore_day_bounds_utc, singapore_yesterday
 from .supabase_store import get_supabase, upsert_source_run, upsert_table
 
 
@@ -35,8 +35,6 @@ GEMINI_TIMEOUT_SECONDS = 90
 async def build_report() -> dict:
     target = singapore_yesterday()
     start_utc, end_utc = singapore_day_bounds_utc(target.report_date)
-    tz_target = timezone.utc
-
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     bot = discord.Client(intents=discord.Intents.all())
     done_event = asyncio.Event()
@@ -82,7 +80,7 @@ async def build_report() -> dict:
                 stats["vitals"]["total_messages"] += 1
                 channel_count += 1
                 active_user_ids.add(msg.author.id)
-                msg_sg = msg.created_at.astimezone(start_utc.tzinfo or tz_target)
+                msg_sg = msg.created_at.astimezone(SINGAPORE_TZ)
                 hour_label = msg_sg.strftime("%I %p")
                 stats["hourly_activity"][hour_label] += 1
                 user_counts[msg.author.name] += 1

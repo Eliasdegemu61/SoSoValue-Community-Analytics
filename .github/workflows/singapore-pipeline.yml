@@ -5,38 +5,11 @@ on:
     - cron: "3 16 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: singapore-pipeline
+  cancel-in-progress: false
+
 jobs:
-  telegram_daily:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
-      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-      TELEGRAM_STRING_SESSION: ${{ secrets.TELEGRAM_STRING_SESSION }}
-      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Install dependencies
-        run: python -m pip install -r backend_supabase/requirements.txt
-
-      - name: Wait to avoid Gemini overlap
-        run: sleep 420
-
-      - name: Run Telegram daily pipeline
-        run: python -m backend_supabase.telegram_daily_supabase
-
   discord_daily:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -65,10 +38,42 @@ jobs:
       - name: Run Discord daily pipeline
         run: python -m backend_supabase.discord_daily_supabase
 
-  weekly_report:
+  telegram_daily:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: discord_daily
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+      TELEGRAM_STRING_SESSION: ${{ secrets.TELEGRAM_STRING_SESSION }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install -r backend_supabase/requirements.txt
+
+      - name: Wait after Discord to avoid Gemini overlap
+        run: sleep 420
+
+      - name: Run Telegram daily pipeline
+        run: python -m backend_supabase.telegram_daily_supabase
+
+  weekly_report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: telegram_daily
     env:
       DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
       TELEGRAM_API_ID: ${{ secrets.TELEGRAM_API_ID }}

@@ -24,8 +24,8 @@ TELEGRAM_STRING_SESSION = require_env("TELEGRAM_STRING_SESSION").strip()
 CHAT_ID = "sosovaluecommunity"
 DEFAULT_COMMUNITY = "SOSOVALUE"
 MAX_TELEGRAM_MESSAGES = 10000
-GEMINI_TIMEOUT_SECONDS = 90
-GEMINI_RETRIES = 3
+GEMINI_TIMEOUT_SECONDS = 45
+GEMINI_RETRIES = 1
 
 SECTION_NAMES = {
     "1": "General",
@@ -80,9 +80,11 @@ async def generate_analysis(gemini_client: genai.Client, prompt: str, contents: 
         except Exception as exc:
             last_error = exc
             print(f"Gemini Telegram analysis attempt {attempt} failed: {exc}")
-            if attempt < GEMINI_RETRIES:
-                await asyncio.sleep(20 * attempt)
-    raise RuntimeError(f"Gemini Telegram analysis failed after {GEMINI_RETRIES} attempts: {last_error}")
+    return {
+        "summary": f"AI analysis unavailable for this run: {last_error}",
+        "questions": [],
+        "ai_error": str(last_error),
+    }
 
 
 async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
@@ -90,7 +92,9 @@ async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
     gemini_client = genai.Client(api_key=GEMINI_API_KEY)
     session = StringSession(TELEGRAM_STRING_SESSION)
 
-    async with TelegramClient(session, API_ID, API_HASH) as client:
+    client = TelegramClient(session, API_ID, API_HASH)
+    try:
+        await client.connect()
         if not await client.is_user_authorized():
             raise RuntimeError(
                 "Telegram string session is missing, expired, or invalid. "
@@ -175,6 +179,8 @@ async def build_report(community: str = DEFAULT_COMMUNITY) -> dict:
                 "report_date": target.iso_date,
             },
         }
+    finally:
+        await client.disconnect()
 
 
 def persist_report(report: dict) -> None:

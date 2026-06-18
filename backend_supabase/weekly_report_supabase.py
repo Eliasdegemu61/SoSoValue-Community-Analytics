@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
-
 from google import genai
 
 from .config import load_env, require_env
@@ -13,7 +11,7 @@ from .supabase_store import fetch_discord_reports_window, get_supabase, upsert_s
 load_env()
 
 GEMINI_API_KEY = require_env("GEMINI_API_KEY")
-GEMINI_RETRIES = 3
+GEMINI_RETRIES = 1
 
 
 def normalize_reports(value: dict) -> dict:
@@ -73,9 +71,21 @@ def generate_weekly_report(client: genai.Client, prompt: str, data_list: list[di
         except Exception as exc:
             last_error = exc
             print(f"Gemini weekly report attempt {attempt} failed: {exc}")
-            if attempt < GEMINI_RETRIES:
-                time.sleep(20 * attempt)
-    raise RuntimeError(f"Gemini weekly report failed after {GEMINI_RETRIES} attempts: {last_error}")
+    fallback = normalize_reports({})
+    for category in fallback:
+        questions: list[str] = []
+        summaries: list[str] = []
+        for item in data_list:
+            section = (item.get("reports") or {}).get(category) or {}
+            if section.get("summary"):
+                summaries.append(str(section["summary"]))
+            if isinstance(section.get("questions"), list):
+                questions.extend(str(question) for question in section["questions"] if str(question).strip())
+        fallback[category] = {
+            "summary": summaries[0] if summaries else f"Weekly AI summary unavailable: {last_error}",
+            "questions": questions[:10],
+        }
+    return {"reports": fallback, "ai_error": str(last_error)}
 
 
 def build_weekly_report() -> dict:

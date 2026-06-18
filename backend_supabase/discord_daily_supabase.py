@@ -29,8 +29,8 @@ CHANNELS = {
 }
 
 MAX_MESSAGES_PER_CHANNEL = 5000
-GEMINI_TIMEOUT_SECONDS = 90
-GEMINI_RETRIES = 3
+GEMINI_TIMEOUT_SECONDS = 45
+GEMINI_RETRIES = 1
 
 
 def normalize_reports(value: dict) -> dict:
@@ -72,6 +72,39 @@ def has_useful_reports(reports: dict) -> bool:
     )
 
 
+def fallback_reports(chat_corpus: list[str], error: Exception | None = None) -> dict:
+    reports = {
+        "retail": {"summary": "", "questions": []},
+        "trading": {"summary": "", "questions": []},
+        "tickets": {"summary": "", "questions": []},
+        "dev": {"summary": "", "questions": []},
+    }
+    buckets = {
+        "retail": ("retail", "app", "reward", "point", "exp", "airdrop", "task", "soso"),
+        "trading": ("trade", "trading", "perp", "spot", "order", "volume", "position", "leverage"),
+        "tickets": ("ticket", "support", "help", "issue", "problem", "error", "failed", "withdraw", "deposit"),
+        "dev": ("api", "dev", "contract", "bug", "wallet", "backend", "frontend", "sdk"),
+    }
+    for line in chat_corpus[-300:]:
+        text = line.strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if "?" not in text and not any(word in lowered for word in ("how", "why", "when", "where", "what", "issue", "error")):
+            continue
+        for category, keywords in buckets.items():
+            if any(keyword in lowered for keyword in keywords):
+                if len(reports[category]["questions"]) < 5:
+                    reports[category]["questions"].append(text[:300])
+                break
+    note = "AI summary unavailable; showing extracted Discord questions from the daily message corpus."
+    if error:
+        note = f"{note} Gemini error: {error}"
+    for category, section in reports.items():
+        section["summary"] = note if section["questions"] else "No major questions detected in this category."
+    return reports
+
+
 async def generate_reports(gemini_client: genai.Client, prompt: str, contents: str) -> dict:
     last_error: Exception | None = None
     for attempt in range(1, GEMINI_RETRIES + 1):
@@ -94,8 +127,6 @@ async def generate_reports(gemini_client: genai.Client, prompt: str, contents: s
         except Exception as exc:
             last_error = exc
             print(f"Gemini Discord analysis attempt {attempt} failed: {exc}")
-            if attempt < GEMINI_RETRIES:
-                await asyncio.sleep(20 * attempt)
     raise RuntimeError(f"Gemini Discord analysis failed after {GEMINI_RETRIES} attempts: {last_error}")
 
 
@@ -173,9 +204,9 @@ async def build_report() -> dict:
         ]
 
         if not chat_corpus:
-            result_holder["error"] = RuntimeError(
-                "No Discord messages found for Gemini analysis; refusing to save an empty report."
-            )
+            stats["reports"] = fallback_reports([], None)
+            result_holder["stats"] = stats
+            print("No Discord messages found for Gemini analysis; saving zero-message report.")
             done_event.set()
             await bot.close()
             return
@@ -190,10 +221,8 @@ async def build_report() -> dict:
             stats["reports"] = await generate_reports(gemini_client, prompt, "\n".join(chat_corpus[-1500:]))
             print("Gemini analysis completed.")
         except Exception as exc:
-            result_holder["error"] = exc
-            done_event.set()
-            await bot.close()
-            return
+            print(f"Gemini analysis unavailable; saving fallback Discord report: {exc}")
+            stats["reports"] = fallback_reports(chat_corpus, exc)
 
         result_holder["stats"] = stats
         print(f"Discord extraction complete for {target.iso_date}.")

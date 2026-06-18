@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
-
 from google import genai
 
 from .config import load_env, require_env
@@ -13,7 +11,7 @@ from .supabase_store import fetch_discord_reports_window, get_supabase, upsert_s
 load_env()
 
 GEMINI_API_KEY = require_env("GEMINI_API_KEY")
-GEMINI_RETRIES = 3
+GEMINI_RETRIES = 1
 
 
 def normalize_category(value: str) -> str:
@@ -53,9 +51,16 @@ def generate_suggestions(gemini_client: genai.Client, prompt: str, weekly_report
         except Exception as exc:
             last_error = exc
             print(f"Gemini weekly suggestions attempt {attempt} failed: {exc}")
-            if attempt < GEMINI_RETRIES:
-                time.sleep(20 * attempt)
-    raise RuntimeError(f"Gemini weekly suggestions failed after {GEMINI_RETRIES} attempts: {last_error}")
+    return {
+        "team_suggestions": [
+            {
+                "category": "tickets",
+                "action_point": f"Review the latest Discord questions manually because AI suggestions were unavailable: {last_error}",
+                "action_type": "resolve",
+            }
+        ],
+        "ai_error": str(last_error),
+    }
 
 
 def build_weekly_suggestions() -> dict:
